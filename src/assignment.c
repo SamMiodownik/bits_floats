@@ -115,33 +115,152 @@ uint32_t multiply_by_24(uint32_t x) {
 }
 
 fp32_info_t fp32_decode(uint32_t bits) {
-    (void)bits;
 
     fp32_info_t info = {
         .negative = false,
-        .kind = FP32_ZERO,
+        .kind = FP32_NORMAL,
         .exponent_bits = 0,
         .fraction_bits = 0,
         .unbiased_exponent = -126,
     };
+    if((bits>>31 & 1) == 1){
+        info.negative = true;
+    }
+    int exponent = 0;
+    int a = 1;
+    for(int x = 23; x < 31; x++){
+        if((bits>>x & 1) == 1){
+            exponent += a;
+        }
+        a *= 2;
+    }
+    info.exponent_bits = exponent;
+    info.unbiased_exponent = (exponent-127);
+    int fraction = 0;
+    a = 1;
+    for(int x = 0; x < 23; x++){
+        if((bits>>x & 1) == 1){
+            fraction += a;
+        }
+        a *= 2;
+    }
+    info.fraction_bits = fraction;
+
+    info.exponent_bits = exponent;
+
+    if(exponent == 0){
+        info.unbiased_exponent = -126;
+
+        if(fraction == 0){
+            info.kind = FP32_ZERO;
+        }else{
+            info.kind = FP32_SUBNORMAL;
+        }
+    }else if(exponent == 255){
+        info.unbiased_exponent = 0;
+
+        if(fraction == 0){
+            info.kind = FP32_INFINITY;
+        }else{
+            info.kind = FP32_NAN;
+        }
+    }else{
+        info.kind = FP32_NORMAL;
+        info.unbiased_exponent = exponent - 127;
+    }
+    
+
     return info;
 }
 
 double fp32_exact_value(uint32_t bits) {
-    (void)bits;
-    return 0.0;
+    fp32_info_t info = fp32_decode(bits);
+
+    double sign = info.negative ? -1.0 : 1.0;
+    double result = 0.0;
+
+    if(info.kind == FP32_ZERO){
+        return sign * result;
+    }
+    if(info.kind == FP32_INFINITY){
+        return sign * INFINITY;
+    }
+    if(info.kind == FP32_NAN){
+        return NAN;
+    }
+    if(info.kind == FP32_NORMAL){
+        result = sign * (1.0 + (double)info.fraction_bits / 8388608.0) * pow(2.0, info.unbiased_exponent);
+    }
+    if(info.kind == FP32_SUBNORMAL){
+        result = sign * ((double)info.fraction_bits / 8388608.0) * pow(2.0, info.unbiased_exponent);
+    }
+    return result;
 }
 
 uint32_t fp32_next_up_bits(uint32_t bits) {
-    (void)bits;
-    return 0;
+    uint32_t exponent = (bits >> 23) & UINT32_C(0xFF);
+    uint32_t fraction = bits & UINT32_C(0x7FFFFF);
+
+    if (exponent == UINT32_C(0xFF) && fraction != 0) {
+        return bits;  // NaN
+    }
+
+    if (bits == UINT32_C(0x7F800000)) {
+        return bits;  // Positive infinity
+    }
+
+    if (bits == UINT32_C(0x80000000)) {
+        return UINT32_C(1);  // Negative zero -> smallest positive subnormal
+    }
+
+    if ((bits & UINT32_C(0x80000000)) != 0) {
+        return bits - UINT32_C(1);
+    }
+
+    return bits + UINT32_C(1);
 }
 
 bool fp32_truncate_to_int(uint32_t bits, int32_t *out) {
-    (void)bits;
+    bool negative = (bits & UINT32_C(0x80000000)) != 0;
+    unsigned exponent_bits = (bits >> 23) & UINT32_C(0xFF);
+    uint32_t fraction = bits & UINT32_C(0x7FFFFF);
+
+    if (exponent_bits == 0xFF) {
+        return false;
+    }
+
+    if (exponent_bits < 127) {
+        if (out != NULL) {
+            *out = 0;
+        }
+        return true;
+    }
+
+    unsigned exponent = exponent_bits - 127;
+
+    if (exponent > 31 ||
+        (exponent == 31 && (!negative || fraction != 0))) {
+        return false;
+    }
+
+    uint32_t significand = UINT32_C(0x800000) | fraction;
+    uint32_t magnitude;
+
+    if (exponent >= 23) {
+        magnitude = significand << (exponent - 23);
+    } else {
+        magnitude = significand >> (23 - exponent);
+    }
 
     if (out != NULL) {
-        *out = 0;
+        if (negative) {
+            *out = magnitude == UINT32_C(0x80000000)
+                ? INT32_MIN
+                : -(int32_t)magnitude;
+        } else {
+            *out = (int32_t)magnitude;
+        }
     }
-    return false;
+
+    return true;
 }
