@@ -202,15 +202,15 @@ uint32_t fp32_next_up_bits(uint32_t bits) {
     uint32_t fraction = bits & UINT32_C(0x7FFFFF);
 
     if (exponent == UINT32_C(0xFF) && fraction != 0) {
-        return bits;  // NaN
+        return bits;
     }
 
     if (bits == UINT32_C(0x7F800000)) {
-        return bits;  // Positive infinity
+        return bits;
     }
 
     if (bits == UINT32_C(0x80000000)) {
-        return UINT32_C(1);  // Negative zero -> smallest positive subnormal
+        return UINT32_C(1);
     }
 
     if ((bits & UINT32_C(0x80000000)) != 0) {
